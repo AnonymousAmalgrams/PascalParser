@@ -5,12 +5,13 @@
 # token.h is assumed to be a local file because on some machines
 # or yacc versions tokenb.h must be used instead (renamed token.h).
 
-all: lexer
+all: parser
 
 clean:
 	rm -rf *.o
-	rm -rf lexer
+	rm -rf parser
 	rm -rf lex.yy.c
+	rm -rf y.tab.c
 
 # To compile starter file lex1.c --> lex1
 # 
