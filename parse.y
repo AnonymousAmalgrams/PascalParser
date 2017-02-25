@@ -81,14 +81,21 @@ TOKEN parseresult;
 
 %%
 
-  program    :  statement DOT                  { parseresult = $1; }
+  program    :  PROGRAM IDENTIFIER LPAREN id_list RPAREN SEMICOLON lblock DOT   { parseresult = makeprogram($2, $4, $7); }
              ;
+  lblock     :  cblock
+             ;
+  cblock     :  tblock
+  	  	  	 ;
+  tblock     :  vblock
+  	  	     ;
   statement  :  BEGINBEGIN statement endpart
                                        { $$ = makeprogn($1,cons($2, $3)); }
              |  IF expr THEN statement endif   { $$ = makeif($1, $2, $4, $5); }
              |  FOR assignment TO expr DO statement	{ $$ = makefor(1, $1, $2, $3, $4, $5, $6); }
              |  FOR assignment DOWNTO expr DO statement	{ $$ = makefor(-1, $1, $2, $3, $4, $5, $6); }
              |  assignment
+			 |  funcall
              ;
   endpart    :  SEMICOLON statement endpart    { $$ = cons($2, $3); }
              |  END                            { $$ = NULL; }
@@ -98,6 +105,28 @@ TOKEN parseresult;
              ;
   assignment :  IDENTIFIER ASSIGN expr         { $$ = binop($2, $1, $3); }
              ;
+  id_list    : IDENTIFIER COMMA id_list        { $$ = cons($1, $3); }
+             | IDENTIFIER
+			 ;
+  simple_type : IDENTIFIER
+              ;
+  type       : simple_type
+             ;
+  vdef       : id_list COLON type             { instvars($1, $3); }
+             ;
+  vdef_list  : vdef SEMICOLON vdef_list            { /* do nothing */ }
+             | vdef SEMICOLON                      { /* do nothing */ }
+			 ;
+  vblock     : VAR vdef_list block            { $$ = $3; }
+             | block                          
+			 ;
+  block      : BEGINBEGIN statement endpart   { $$ = makeprogn($1,cons($2, $3)); }
+             ;
+  funcall    : IDENTIFIER LPAREN expr_list RPAREN  { $$ = makefuncall($2, $1, $3); }
+  	  	  	 ;
+  expr_list  : expr COMMA expr_list            { $$ = cons($1, $3); }
+             | expr
+			 ;
   expr       : expr compare_op simple_expr     { $$ = binop($2, $1, $3); }
              | simple_expr
 			 ;
@@ -111,6 +140,7 @@ TOKEN parseresult;
              ;
   factor     :  LPAREN expr RPAREN             { $$ = $2; }
              |  unsigned_constant
+			 |  funcall
              ;
   plus_op    :  PLUS
   	  	     |  MINUS
@@ -148,13 +178,14 @@ TOKEN parseresult;
    are working.
   */
 
-#define DEBUG        63             /* set bits here for debugging, 0 = off  */
+#define DEBUG        127             /* set bits here for debugging, 0 = off  */
 #define DB_CONS       1             /* bit to trace cons */
 #define DB_BINOP      2             /* bit to trace binop */
 #define DB_MAKEIF     4             /* bit to trace makeif */
 #define DB_MAKEPROGN  8             /* bit to trace makeprogn */
 #define DB_PARSERES  16             /* bit to trace parseresult */
 #define DB_UNARYOP   32             /* bit to trace unaryop */
+#define DB_VAR       64
  int labelnumber = 0;  /* sequential counter for internal label numbers */
 
    /*  Note: you should add to the above values and insert debugging
@@ -220,6 +251,14 @@ TOKEN makeif(TOKEN tok, TOKEN exp, TOKEN thenpart, TOKEN elsepart)
         };
      return tok;
    }
+
+/* makefuncall makes a FUNCALL operator and links it to the fn and args.
+   tok is a (now) unused token that is recycled. */
+TOKEN makefuncall(TOKEN tok, TOKEN fn, TOKEN args) {
+	TOKEN t1 = makeop(FUNCALLOP);
+	findid(fn);
+	return binop(t1, fn, args);
+}
 
 TOKEN makeprogn(TOKEN tok, TOKEN statements)
   {  tok->tokentype = OPERATOR;
@@ -309,6 +348,94 @@ TOKEN makefor(int sign, TOKEN tok, TOKEN asg, TOKEN tokb, TOKEN endexpr,
 	return makeprogn(talloc(), asg);
 	
 	
+}
+
+/* findtype looks up a type name in the symbol table, puts the pointer
+   to its type into tok->symtype, returns tok. */
+
+TOKEN findtype(TOKEN tok) {
+	SYMBOL sym, typ;
+	char error_details[1024];
+	sym = searchst(tok->stringval);
+	printf("Reached 354\n");
+	if (sym == 0) {			
+		sprintf(error_details, "Type %s not found.\n", tok->stringval);
+		yyerror(error_details);
+		return tok;
+	}
+	printf("Reached 360\n");
+	tok->symentry = sym;	
+	tok->symtype = sym;
+	return tok;
+}
+
+
+/* instvars will install variables in symbol table.
+   typetok is a token containing symbol table pointer for type. */
+void  instvars(TOKEN idlist, TOKEN typetok) {
+	int symbol_size = 0;
+	int var_loc = 0;
+	SYMBOL sym;
+	TOKEN tok = idlist;
+	if (DEBUG & DB_VAR) {
+		printf("initializing vars\n");
+		dbugprinttok(typetok);
+		dbugprinttok(idlist);
+	}
+	findtype(typetok);
+	printf("Reached 381\n");
+	symbol_size = alignsize (typetok->symtype);
+	printf("Reached 383\n");
+	while (tok != 0) {
+		printf("in while");
+		var_loc = wordaddress(blockoffs[blocknumber], symbol_size);
+		sym = insertsym(tok->stringval);	 
+		sym->kind = VARSYM;
+	    sym->datatype = typetok->symtype;
+		sym->size = symbol_size;
+		sym->offset = blockoffs[blocknumber];
+		sym->blocklevel = blocknumber;
+		tok->symentry = sym;
+		tok->symtype = sym->datatype;
+		if (sym->datatype->kind == BASICTYPE) {
+			tok->datatype = sym->datatype->basicdt;
+		}
+		blockoffs[blocknumber] += var_loc;
+		tok = tok->link;
+	}
+	
+	
+}
+
+/* makeprogram makes the tree structures for the top-level program */
+TOKEN makeprogram(TOKEN name, TOKEN args, TOKEN statements) {
+	TOKEN tok_program = makeop(PROGRAMOP);
+	TOKEN tok;
+	tok_program->operands = name;
+	tok = makeprogn(talloc(), args);
+	name->link = tok;
+	tok->link = statements;
+	return tok_program;
+}
+
+/* findid finds an identifier in the symbol table, sets up symbol table
+   pointers, changes a constant to its number equivalent */
+TOKEN findid(TOKEN tok) {
+	SYMBOL sym, typ;
+	char error_details[1024];
+	sym = searchst(tok->stringval);
+	if (sym == 0) {
+		sprintf(error_details, "Identifier %s not found.\n", tok->stringval);
+		yyerror(error_details);
+		return tok;
+	}
+	tok->symentry = sym;
+	typ = sym->datatype;
+	tok->symtype = typ;
+	if ( typ->kind == BASICTYPE || typ->kind == POINTERSYM) {
+	    tok->datatype = typ->basicdt;
+	}
+	return tok;
 }
 
 int wordaddress(int n, int wordsize)
