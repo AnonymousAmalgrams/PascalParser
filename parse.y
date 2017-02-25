@@ -160,7 +160,7 @@ TOKEN parseresult;
 			 |  GE 
 			 |  IN
 			 ;
-  unsigned_constant : IDENTIFIER 
+  unsigned_constant : IDENTIFIER 	{ $$ = findid($1); }
                     | NUMBER 
 					| NIL 
 					| STRING
@@ -400,7 +400,7 @@ void  instvars(TOKEN idlist, TOKEN typetok) {
 		if (sym->datatype->kind == BASICTYPE) {
 			tok->datatype = sym->datatype->basicdt;
 		}
-		blockoffs[blocknumber] += var_loc;
+		blockoffs[blocknumber] += symbol_size;
 		tok = tok->link;
 	}
 	
