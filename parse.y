@@ -103,7 +103,7 @@ TOKEN parseresult;
   endif      :  ELSE statement                 { $$ = $2; }
              |  /* empty */                    { $$ = NULL; }
              ;
-  assignment :  IDENTIFIER ASSIGN expr         { $$ = binop($2, $1, $3); }
+  assignment :  IDENTIFIER ASSIGN expr         { $$ = binop($2, findid($1), $3); }
              ;
   id_list    : IDENTIFIER COMMA id_list        { $$ = cons($1, $3); }
              | IDENTIFIER
@@ -165,10 +165,6 @@ TOKEN parseresult;
 					| NIL 
 					| STRING
 					;
-  sign       : PLUS 
-             | MINUS
-			 ;
-
 %%
 
 /* You should add your own debugging flags below, and add debugging
@@ -256,7 +252,7 @@ TOKEN makeif(TOKEN tok, TOKEN exp, TOKEN thenpart, TOKEN elsepart)
    tok is a (now) unused token that is recycled. */
 TOKEN makefuncall(TOKEN tok, TOKEN fn, TOKEN args) {
 	TOKEN t1 = makeop(FUNCALLOP);
-	findid(fn);
+	findid(fn); /* locate the function in the symbol table */
 	return binop(t1, fn, args);
 }
 
@@ -319,32 +315,33 @@ TOKEN makefor(int sign, TOKEN tok, TOKEN asg, TOKEN tokb, TOKEN endexpr,
               TOKEN tokc, TOKEN statement) {
 	int cur_labelnumber = labelnumber;
 	TOKEN label_tok = makelabel();
-	TOKEN goto_tok = makegoto(cur_labelnumber);
+	TOKEN goto_tok = makegoto(cur_labelnumber); 
+	/* copy assignment operator for use in multiple situations */
 	TOKEN assign_var = copytok(asg->operands);
 	TOKEN assign_var1 = copytok(asg->operands);
 	TOKEN assign_var2 = copytok(asg->operands);
 	TOKEN end_check_tok = 0;
 	TOKEN tok_increment = 0;
 	TOKEN tok_var_incr = 0;
-	if (sign == 1) {
-	   //(<= i endpart) 
+	/* Build the termination condition */
+	if (sign == 1) { /* to */
 		end_check_tok = makeop(LEOP);
 		tok_increment = makeop(PLUSOP);
-	} else {
-		//(>= i endpart) 
+	} else { /* downto */
 		end_check_tok = makeop(GEOP);
 		tok_increment = makeop(MINUSOP);
 	}
-	end_check_tok = binop(end_check_tok, assign_var, endexpr);
+	end_check_tok = binop(end_check_tok, assign_var, endexpr); /* build final termination condition */
 	fillintc(tokb, 1);
 	binop(tok_increment, assign_var1, tokb);
 	tok_var_incr = makeop(ASSIGNOP);
-	binop(tok_var_incr, assign_var2, tok_increment);
-	cons(statement, cons(tok_var_incr, goto_tok));
+	binop(tok_var_incr, assign_var2, tok_increment); /* building the increment */
+	cons(statement, cons(tok_var_incr, goto_tok)); 
 	makeprogn(tokc, statement);
-	tok = makeif(tok, end_check_tok, tokc, 0);
+	tok = makeif(tok, end_check_tok, tokc, 0); /* Build if condition */
+	/* build using cons to create final tree */
 	cons(label_tok, tok);
-	cons(asg, label_tok); 
+	cons(asg, label_tok);  
 	return makeprogn(talloc(), asg);
 	
 	
@@ -352,18 +349,15 @@ TOKEN makefor(int sign, TOKEN tok, TOKEN asg, TOKEN tokb, TOKEN endexpr,
 
 /* findtype looks up a type name in the symbol table, puts the pointer
    to its type into tok->symtype, returns tok. */
-
 TOKEN findtype(TOKEN tok) {
 	SYMBOL sym, typ;
 	char error_details[1024];
 	sym = searchst(tok->stringval);
-	printf("Reached 354\n");
-	if (sym == 0) {			
+	if (sym == 0) {	/* print error if symbol not found */
 		sprintf(error_details, "Type %s not found.\n", tok->stringval);
 		yyerror(error_details);
 		return tok;
 	}
-	printf("Reached 360\n");
 	tok->symentry = sym;	
 	tok->symtype = sym;
 	return tok;
@@ -382,29 +376,30 @@ void  instvars(TOKEN idlist, TOKEN typetok) {
 		dbugprinttok(typetok);
 		dbugprinttok(idlist);
 	}
-	findtype(typetok);
-	printf("Reached 381\n");
-	symbol_size = alignsize (typetok->symtype);
-	printf("Reached 383\n");
+	findtype(typetok); /* find type */
+	symbol_size = alignsize (typetok->symtype); /* find the size of type */
 	while (tok != 0) {
-		printf("in while");
-		var_loc = wordaddress(blockoffs[blocknumber], symbol_size);
-		sym = insertsym(tok->stringval);	 
+		var_loc = wordaddress(blockoffs[blocknumber], symbol_size); /* find position for insertion in block offset table*/
+		sym = insertsym(tok->stringval);	
+		/* Set up symbol as variable and initialize with block/symbol table info */
 		sym->kind = VARSYM;
 	    sym->datatype = typetok->symtype;
 		sym->size = symbol_size;
-		sym->offset = blockoffs[blocknumber];
+		sym->offset = var_loc;
 		sym->blocklevel = blocknumber;
 		tok->symentry = sym;
 		tok->symtype = sym->datatype;
 		if (sym->datatype->kind == BASICTYPE) {
 			tok->datatype = sym->datatype->basicdt;
 		}
-		blockoffs[blocknumber] += symbol_size;
+		/* adjust the block offset for proper usage of memory */
+		if (var_loc != blockoffs[blocknumber]) {
+			blockoffs[blocknumber] += symbol_size + (var_loc - blockoffs[blocknumber]);
+		} else {
+			blockoffs[blocknumber] += symbol_size;
+		}
 		tok = tok->link;
 	}
-	
-	
 }
 
 /* makeprogram makes the tree structures for the top-level program */
@@ -424,11 +419,12 @@ TOKEN findid(TOKEN tok) {
 	SYMBOL sym, typ;
 	char error_details[1024];
 	sym = searchst(tok->stringval);
-	if (sym == 0) {
+	if (sym == 0) { /* return error if ID not found */
 		sprintf(error_details, "Identifier %s not found.\n", tok->stringval);
 		yyerror(error_details);
 		return tok;
 	}
+	/* fill up token with symbol table entry */
 	tok->symentry = sym;
 	typ = sym->datatype;
 	tok->symtype = typ;
