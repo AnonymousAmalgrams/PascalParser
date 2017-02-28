@@ -383,7 +383,7 @@ void  instvars(TOKEN idlist, TOKEN typetok) {
 		sym = insertsym(tok->stringval);	
 		/* Set up symbol as variable and initialize with block/symbol table info */
 		sym->kind = VARSYM;
-	    sym->datatype = typetok->symtype;
+		sym->datatype = typetok->symtype;
 		sym->size = symbol_size;
 		sym->offset = var_loc;
 		sym->blocklevel = blocknumber;
